@@ -132,7 +132,7 @@ export default function PhotoboothApp() {
     ctx.fillStyle = activeFrame.color;
     ctx.font = "bold 28px Georgia, serif";
     ctx.textAlign = "center";
-    ctx.fillText("✦ PHOTOBOOTH ✦", canvas.width / 2, 44);
+    ctx.fillText("", canvas.width / 2, 44);
 
     for (let i = 0; i < photos.length; i++) {
       const y = HEADER + i * (PHOTO_H + PADDING);
