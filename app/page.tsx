@@ -53,8 +53,8 @@ export default function PhotoboothApp() {
     try {
       const constraints: MediaStreamConstraints = {
         video: selectedCamera
-          ? { deviceId: { exact: selectedCamera }, width: 640, height: 480 }
-          : { width: 640, height: 480, facingMode: "user" },
+          ? { deviceId: { exact: selectedCamera }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+          : { width: { ideal: 1920 }, height: { ideal: 1080 }, facingMode: "user" },
         audio: false,
       };
       const s = await navigator.mediaDevices.getUserMedia(constraints);
