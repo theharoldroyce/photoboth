@@ -28,6 +28,33 @@ export default function PhotoboothApp() {
   const [mirrored, setMirrored] = useState(true);
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<string>("");
+  const bcRef = useRef<BroadcastChannel | null>(null);
+  const stateRef = useRef({ phase, countdown, photoCount, frameColor: activeFrame.color, mirrored, cameraId: selectedCamera });
+
+  // Keep stateRef current so the onmessage handler always reads fresh values
+  useEffect(() => {
+    stateRef.current = { phase, countdown, photoCount, frameColor: activeFrame.color, mirrored, cameraId: selectedCamera };
+  }, [phase, countdown, photoCount, activeFrame, mirrored, selectedCamera]);
+
+  // BroadcastChannel for syncing state to /display screen
+  useEffect(() => {
+    const bc = new BroadcastChannel("photobooth-sync");
+    bcRef.current = bc;
+
+    bc.onmessage = (e) => {
+      if (e.data.type === "display-ready") {
+        bc.postMessage({ type: "state", ...stateRef.current });
+      }
+    };
+
+    return () => bc.close();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Broadcast state whenever it changes
+  useEffect(() => {
+    bcRef.current?.postMessage({ type: "state", ...stateRef.current });
+  }, [phase, countdown, photoCount, activeFrame, mirrored, selectedCamera]);
 
   const loadCameras = useCallback(async () => {
     try {
@@ -329,6 +356,16 @@ export default function PhotoboothApp() {
               </div>
             </label>
           </section>
+
+          <section className="panel-section">
+            <button
+              className="btn-display"
+              onClick={() => window.open("/display", "photobooth-display", "fullscreen=yes")}
+            >
+              Open Display Screen
+            </button>
+            <p className="display-hint">Opens a full-screen mirror for subjects</p>
+          </section>
         </div>
       </div>
 
@@ -423,6 +460,9 @@ export default function PhotoboothApp() {
         .toggle-thumb { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: white; transition: transform 0.3s; }
         .toggle-track.on .toggle-thumb { transform: translateX(20px); }
         .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+        .btn-display { width: 100%; padding: 0.6rem 1rem; background: transparent; border: 1px solid var(--accent); border-radius: var(--radius); color: var(--accent); font-family: 'DM Mono', monospace; font-size: 0.8rem; cursor: pointer; letter-spacing: 0.08em; transition: all 0.2s; }
+        .btn-display:hover { background: var(--accent); color: #1a0a0a; }
+        .display-hint { color: var(--muted); font-size: 0.65rem; margin-top: 0.4rem; text-align: center; }
         @media (max-width: 768px) {
           .layout { flex-direction: column; padding: 1rem; }
           .camera-col { position: static; }
