@@ -7,6 +7,7 @@ const FRAMES = [
   { id: "pink", label: "Pink", color: "#f472b6" },
   { id: "gold", label: "Gold", color: "#d97706" },
   { id: "neon", label: "Neon", color: "#22d3ee" },
+  { id: "white", label: "White", color: "#ffffff" },
 ];
 
 type Photo = { dataUrl: string };
@@ -285,7 +286,7 @@ export default function PhotoboothApp() {
               className="strip-preview"
               style={{ borderColor: activeFrame.color, boxShadow: `0 0 20px ${activeFrame.color}55` }}
             >
-              <div className="strip-header" style={{ background: activeFrame.color }}>✦ PHOTOBOOTH ✦</div>
+              <div className="strip-header" style={{ background: activeFrame.color }}></div>
               <div className="strip-photos">
                 {[0, 1, 2, 3].map((i) => (
                   <div key={i} className="strip-slot">
