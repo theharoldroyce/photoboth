@@ -17,7 +17,7 @@ export default function PhotoboothApp() {
   const [photoCount, setPhotoCount] = useState(0);
   const [error, setError] = useState("");
   const [mirrored, setMirrored] = useState(true);
-  const [layout, setLayout] = useState<"strip" | "polaroid">("strip");
+  const [layout, setLayout] = useState<"strip" | "polaroid" | "redbooth">("strip");
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<string>("");
   const bcRef = useRef<BroadcastChannel | null>(null);
@@ -92,6 +92,73 @@ export default function PhotoboothApp() {
     };
   }, [stream]);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const segmenterRef = useRef<any>(null);
+
+  const initSegmenter = useCallback(async () => {
+    if (segmenterRef.current) return segmenterRef.current;
+    const { ImageSegmenter, FilesetResolver } = await import("@mediapipe/tasks-vision");
+    const vision = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+    );
+    const segmenter = await ImageSegmenter.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath:
+          "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite",
+      },
+      outputCategoryMask: false,
+      outputConfidenceMasks: true,
+      runningMode: "IMAGE",
+    });
+    segmenterRef.current = segmenter;
+    return segmenter;
+  }, []);
+
+  const applyRedBackground = useCallback(
+    async (dataUrl: string): Promise<string> => {
+      const segmenter = await initSegmenter();
+
+      const img = new Image();
+      img.src = dataUrl;
+      await new Promise((r) => { img.onload = r; });
+
+      const off = document.createElement("canvas");
+      off.width = img.width;
+      off.height = img.height;
+      const offCtx = off.getContext("2d")!;
+      offCtx.drawImage(img, 0, 0);
+
+      const result = segmenter.segment(off);
+      const mask = result.confidenceMasks[0].getAsFloat32Array();
+      const imageData = offCtx.getImageData(0, 0, off.width, off.height);
+      const px = imageData.data;
+
+      for (let i = 0; i < mask.length; i++) {
+        const c = mask[i]; // 1 = person, 0 = background
+        const p = i * 4;
+        px[p]     = Math.round(px[p] * c + 204 * (1 - c));
+        px[p + 1] = Math.round(px[p + 1] * c + 0 * (1 - c));
+        px[p + 2] = Math.round(px[p + 2] * c + 0 * (1 - c));
+      }
+
+      offCtx.putImageData(imageData, 0, 0);
+
+      // Subtle vignette to mimic booth lighting
+      const vg = offCtx.createRadialGradient(
+        off.width / 2, off.height * 0.4, off.height * 0.25,
+        off.width / 2, off.height * 0.5, off.height * 0.75
+      );
+      vg.addColorStop(0, "rgba(0,0,0,0)");
+      vg.addColorStop(1, "rgba(0,0,0,0.3)");
+      offCtx.fillStyle = vg;
+      offCtx.fillRect(0, 0, off.width, off.height);
+
+      result.close();
+      return off.toDataURL("image/png");
+    },
+    [initSegmenter]
+  );
+
   const captureFrame = useCallback((): string => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -111,6 +178,10 @@ export default function PhotoboothApp() {
 
   const runSession = useCallback(async () => {
     if (!stream || phase !== "idle") return;
+
+    // Pre-load segmenter so it's ready before first capture
+    if (layout === "redbooth") await initSegmenter();
+
     setPhotos([]);
     setPhotoCount(0);
     setPhase("countdown");
@@ -123,7 +194,8 @@ export default function PhotoboothApp() {
       }
       setCountdown(0);
       setPhase("flash");
-      const dataUrl = captureFrame();
+      const raw = captureFrame();
+      const dataUrl = layout === "redbooth" ? await applyRedBackground(raw) : raw;
       taken.push({ dataUrl });
       setPhotos([...taken]);
       setPhotoCount(i + 1);
@@ -131,7 +203,7 @@ export default function PhotoboothApp() {
       if (i < totalShots - 1) setPhase("countdown");
     }
     setPhase("done");
-  }, [stream, phase, captureFrame, totalShots]);
+  }, [stream, phase, captureFrame, totalShots, layout, initSegmenter, applyRedBackground]);
 
   const formatStripDate = useCallback(() => {
     const now = new Date();
@@ -145,7 +217,47 @@ export default function PhotoboothApp() {
     const canvas = stripRef.current!;
     const ctx = canvas.getContext("2d")!;
 
-    if (layout === "polaroid") {
+    if (layout === "redbooth") {
+      const EDGE = 10;
+      const GAP = 10;
+      const PHOTO_W = 380;
+      const PHOTO_H = 470;
+      const FOOTER_H = 100;
+
+      canvas.width = EDGE + PHOTO_W + GAP + PHOTO_W + EDGE;
+      canvas.height = EDGE + PHOTO_H + GAP + PHOTO_H + FOOTER_H;
+
+      // Black background
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Draw 4 photos in 2x2 grid
+      for (let i = 0; i < 4; i++) {
+        const col = i % 2;
+        const row = Math.floor(i / 2);
+        const x = EDGE + col * (PHOTO_W + GAP);
+        const y = EDGE + row * (PHOTO_H + GAP);
+
+        if (i < photos.length) {
+          const img = new Image();
+          img.src = photos[i].dataUrl;
+          await new Promise((r) => { img.onload = r; });
+          ctx.drawImage(img, x, y, PHOTO_W, PHOTO_H);
+        } else {
+          ctx.fillStyle = "#1a1a1a";
+          ctx.fillRect(x, y, PHOTO_W, PHOTO_H);
+        }
+      }
+
+      // Date bottom-right
+      ctx.fillStyle = "#999999";
+      ctx.font = "14px 'DM Mono', monospace";
+      ctx.textAlign = "right";
+      const now = new Date();
+      const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      const dateStr = `${monthNames[now.getMonth()]}.${String(now.getDate()).padStart(2,"0")}.${now.getFullYear()}`;
+      ctx.fillText(dateStr, canvas.width - EDGE - 4, canvas.height - 14);
+    } else if (layout === "polaroid") {
       const SIDE = 40;
       const BOTTOM = 100;
       const TOP = 40;
@@ -350,11 +462,17 @@ export default function PhotoboothApp() {
               >
                 Polaroid
               </button>
+              <button
+                className={`layout-btn ${layout === "redbooth" ? "active" : ""}`}
+                onClick={() => setLayout("redbooth")}
+              >
+                Red Booth
+              </button>
             </div>
           </section>
 
           <section className="strip-section">
-            <h2 className="panel-title">Your {layout === "strip" ? "Strip" : "Polaroid"}</h2>
+            <h2 className="panel-title">Your {layout === "strip" ? "Strip" : layout === "polaroid" ? "Polaroid" : "Red Booth"}</h2>
             {layout === "polaroid" ? (
               <div className="photo-strip polaroid-layout" style={{ boxShadow: `0 0 20px #00000022` }}>
                 <div className="polaroid-slot">
@@ -365,6 +483,23 @@ export default function PhotoboothApp() {
                   )}
                 </div>
                 <div className="polaroid-date">{formatStripDate()}</div>
+              </div>
+            ) : layout === "redbooth" ? (
+              <div className="photo-strip redbooth-layout">
+                <div className="redbooth-grid">
+                  {[0, 1, 2, 3].map((i) => (
+                    <div key={i} className="redbooth-slot">
+                      {photos[i] ? (
+                        <img src={photos[i].dataUrl} alt={`Photo ${i + 1}`} className="strip-img" />
+                      ) : (
+                        <div className="strip-empty">{i + 1}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="redbooth-footer">
+                  <span className="redbooth-date">{formatStripDate()}</span>
+                </div>
               </div>
             ) : (
               <div className="photo-strip" style={{ boxShadow: `0 0 20px #00000022` }}>
@@ -491,6 +626,11 @@ export default function PhotoboothApp() {
         .strip-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: #444; font-size: 1.2rem; background: #111; }
         .polaroid-slot { aspect-ratio: 1/1; background: #111; border-radius: 2px; overflow: hidden; }
         .polaroid-date { text-align: center; font-size: 0.85rem; font-weight: 700; color: #222; padding: 12px 0 6px; letter-spacing: 0.08em; }
+        .photo-strip.redbooth-layout { background: #000; padding: 6px 6px 0; }
+        .redbooth-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+        .redbooth-slot { aspect-ratio: 4/5; background: #1a1a1a; overflow: hidden; }
+        .redbooth-footer { padding: 6px 6px 8px; text-align: right; }
+        .redbooth-date { font-size: 0.55rem; color: #999; letter-spacing: 0.05em; }
         .panel-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; }
         .panel-title { font-size: 0.7rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.75rem; }
         .toggle-row { display: flex; align-items: center; justify-content: space-between; cursor: pointer; }
