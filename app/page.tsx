@@ -2,14 +2,6 @@
 
 import { useRef, useState, useCallback, useEffect } from "react";
 
-const FRAMES = [
-  { id: "classic", label: "Classic", color: "#1a1a1a" },
-  { id: "pink", label: "Pink", color: "#f472b6" },
-  { id: "gold", label: "Gold", color: "#d97706" },
-  { id: "neon", label: "Neon", color: "#22d3ee" },
-  { id: "white", label: "White", color: "#ffffff" },
-];
-
 type Photo = { dataUrl: string };
 type Phase = "idle" | "countdown" | "flash" | "done";
 
@@ -22,19 +14,19 @@ export default function PhotoboothApp() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [phase, setPhase] = useState<Phase>("idle");
   const [countdown, setCountdown] = useState(0);
-  const [activeFrame, setActiveFrame] = useState(FRAMES[0]);
   const [photoCount, setPhotoCount] = useState(0);
   const [error, setError] = useState("");
   const [mirrored, setMirrored] = useState(true);
+  const [layout, setLayout] = useState<"strip" | "polaroid">("strip");
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<string>("");
   const bcRef = useRef<BroadcastChannel | null>(null);
-  const stateRef = useRef({ phase, countdown, photoCount, frameColor: activeFrame.color, mirrored, cameraId: selectedCamera });
+  const stateRef = useRef({ phase, countdown, photoCount, mirrored, cameraId: selectedCamera });
 
   // Keep stateRef current so the onmessage handler always reads fresh values
   useEffect(() => {
-    stateRef.current = { phase, countdown, photoCount, frameColor: activeFrame.color, mirrored, cameraId: selectedCamera };
-  }, [phase, countdown, photoCount, activeFrame, mirrored, selectedCamera]);
+    stateRef.current = { phase, countdown, photoCount, mirrored, cameraId: selectedCamera };
+  }, [phase, countdown, photoCount, mirrored, selectedCamera]);
 
   // BroadcastChannel for syncing state to /display screen
   useEffect(() => {
@@ -54,7 +46,7 @@ export default function PhotoboothApp() {
   // Broadcast state whenever it changes
   useEffect(() => {
     bcRef.current?.postMessage({ type: "state", ...stateRef.current });
-  }, [phase, countdown, photoCount, activeFrame, mirrored, selectedCamera]);
+  }, [phase, countdown, photoCount, mirrored, selectedCamera]);
 
   const loadCameras = useCallback(async () => {
     try {
@@ -115,6 +107,8 @@ export default function PhotoboothApp() {
     return canvas.toDataURL("image/png");
   }, [mirrored]);
 
+  const totalShots = layout === "polaroid" ? 1 : 4;
+
   const runSession = useCallback(async () => {
     if (!stream || phase !== "idle") return;
     setPhotos([]);
@@ -122,7 +116,7 @@ export default function PhotoboothApp() {
     setPhase("countdown");
 
     const taken: Photo[] = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < totalShots; i++) {
       for (let c = 3; c >= 1; c--) {
         setCountdown(c);
         await new Promise((r) => setTimeout(r, 1000));
@@ -134,10 +128,10 @@ export default function PhotoboothApp() {
       setPhotos([...taken]);
       setPhotoCount(i + 1);
       await new Promise((r) => setTimeout(r, 500));
-      if (i < 3) setPhase("countdown");
+      if (i < totalShots - 1) setPhase("countdown");
     }
     setPhase("done");
-  }, [stream, phase, captureFrame]);
+  }, [stream, phase, captureFrame, totalShots]);
 
   const formatStripDate = useCallback(() => {
     const now = new Date();
@@ -149,45 +143,72 @@ export default function PhotoboothApp() {
 
   const buildStrip = useCallback(async (): Promise<string> => {
     const canvas = stripRef.current!;
-    const BORDER = 30;
-    const PHOTO_W = 420;
-    const PHOTO_H = 315;
-    const GAP = 16;
-    const HEADER_H = 70;
-    const FOOTER_H = 40;
-
-    canvas.width = BORDER + PHOTO_W + BORDER;
-    canvas.height = BORDER + HEADER_H + (PHOTO_H + GAP) * 4 - GAP + FOOTER_H + BORDER;
     const ctx = canvas.getContext("2d")!;
 
-    // White strip background
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (layout === "polaroid") {
+      const SIDE = 40;
+      const BOTTOM = 100;
+      const TOP = 40;
+      const PHOTO_W = 480;
+      const PHOTO_H = 480;
 
-    // Date header
-    ctx.fillStyle = "#222";
-    ctx.font = "bold 28px 'DM Mono', monospace";
-    ctx.textAlign = "center";
-    ctx.fillText(formatStripDate(), canvas.width / 2, BORDER + HEADER_H / 2 + 10);
+      canvas.width = SIDE + PHOTO_W + SIDE;
+      canvas.height = TOP + PHOTO_H + BOTTOM;
 
-    // Draw photo slots
-    for (let i = 0; i < 4; i++) {
-      const x = BORDER;
-      const y = BORDER + HEADER_H + i * (PHOTO_H + GAP);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      if (i < photos.length) {
+      if (photos.length > 0) {
         const img = new Image();
-        img.src = photos[i].dataUrl;
+        img.src = photos[0].dataUrl;
         await new Promise((r) => { img.onload = r; });
-        ctx.drawImage(img, x, y, PHOTO_W, PHOTO_H);
+        ctx.drawImage(img, SIDE, TOP, PHOTO_W, PHOTO_H);
       } else {
         ctx.fillStyle = "#111";
-        ctx.fillRect(x, y, PHOTO_W, PHOTO_H);
+        ctx.fillRect(SIDE, TOP, PHOTO_W, PHOTO_H);
+      }
+
+      ctx.fillStyle = "#222";
+      ctx.font = "bold 24px 'DM Mono', monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(formatStripDate(), canvas.width / 2, TOP + PHOTO_H + BOTTOM / 2 + 8);
+    } else {
+      const BORDER = 30;
+      const PHOTO_W = 420;
+      const PHOTO_H = 315;
+      const GAP = 16;
+      const HEADER_H = 70;
+      const FOOTER_H = 40;
+
+      canvas.width = BORDER + PHOTO_W + BORDER;
+      canvas.height = BORDER + HEADER_H + (PHOTO_H + GAP) * 4 - GAP + FOOTER_H + BORDER;
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = "#222";
+      ctx.font = "bold 28px 'DM Mono', monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(formatStripDate(), canvas.width / 2, BORDER + HEADER_H / 2 + 10);
+
+      for (let i = 0; i < 4; i++) {
+        const x = BORDER;
+        const y = BORDER + HEADER_H + i * (PHOTO_H + GAP);
+
+        if (i < photos.length) {
+          const img = new Image();
+          img.src = photos[i].dataUrl;
+          await new Promise((r) => { img.onload = r; });
+          ctx.drawImage(img, x, y, PHOTO_W, PHOTO_H);
+        } else {
+          ctx.fillStyle = "#111";
+          ctx.fillRect(x, y, PHOTO_W, PHOTO_H);
+        }
       }
     }
 
     return canvas.toDataURL("image/png");
-  }, [photos, formatStripDate]);
+  }, [photos, formatStripDate, layout]);
 
   const downloadStrip = useCallback(async () => {
     const url = await buildStrip();
@@ -255,7 +276,7 @@ export default function PhotoboothApp() {
                 )}
                 {phase !== "idle" && phase !== "done" && (
                   <div className="photo-progress">
-                    {[0, 1, 2, 3].map((i) => (
+                    {Array.from({ length: totalShots }, (_, i) => (
                       <div key={i} className={`progress-dot ${i < photoCount ? "taken" : ""}`} />
                     ))}
                   </div>
@@ -294,14 +315,14 @@ export default function PhotoboothApp() {
               <button className="shutter-btn" onClick={runSession}>
                 <span className="shutter-inner" />
               </button>
-              <p className="controls-hint">4 shots · 3 sec countdown each</p>
+              <p className="controls-hint">{totalShots} {totalShots === 1 ? "shot" : "shots"} · 3 sec countdown</p>
             </div>
           )}
 
           {(phase === "countdown" || phase === "flash") && (
             <div className="session-status">
               <span className="pulse-dot" />
-              Photo {photoCount + 1} of 4
+              Photo {photoCount + 1} of {totalShots}
             </div>
           )}
 
@@ -315,40 +336,55 @@ export default function PhotoboothApp() {
 
         <div className="panel-col">
           <section className="strip-section">
-            <h2 className="panel-title">Your Strip</h2>
-            <div className="photo-strip" style={{ boxShadow: `0 0 20px ${activeFrame.color}55` }}>
-              <div className="strip-header">{formatStripDate()}</div>
-              <div className="strip-photos">
-                {[0, 1, 2, 3].map((i) => (
-                  <div key={i} className="strip-slot">
-                    {photos[i] ? (
-                      <img src={photos[i].dataUrl} alt={`Photo ${i + 1}`} className="strip-img" />
-                    ) : (
-                      <div className="strip-empty">{i + 1}</div>
-                    )}
-                  </div>
-                ))}
+            <h2 className="panel-title">Layout</h2>
+            <div className="layout-row">
+              <button
+                className={`layout-btn ${layout === "strip" ? "active" : ""}`}
+                onClick={() => setLayout("strip")}
+              >
+                Strip
+              </button>
+              <button
+                className={`layout-btn ${layout === "polaroid" ? "active" : ""}`}
+                onClick={() => setLayout("polaroid")}
+              >
+                Polaroid
+              </button>
+            </div>
+          </section>
+
+          <section className="strip-section">
+            <h2 className="panel-title">Your {layout === "strip" ? "Strip" : "Polaroid"}</h2>
+            {layout === "polaroid" ? (
+              <div className="photo-strip polaroid-layout" style={{ boxShadow: `0 0 20px #00000022` }}>
+                <div className="polaroid-slot">
+                  {photos[0] ? (
+                    <img src={photos[0].dataUrl} alt="Photo 1" className="strip-img" />
+                  ) : (
+                    <div className="strip-empty">1</div>
+                  )}
+                </div>
+                <div className="polaroid-date">{formatStripDate()}</div>
               </div>
-            </div>
+            ) : (
+              <div className="photo-strip" style={{ boxShadow: `0 0 20px #00000022` }}>
+                <div className="strip-header">{formatStripDate()}</div>
+                <div className="strip-photos">
+                  {[0, 1, 2, 3].map((i) => (
+                    <div key={i} className="strip-slot">
+                      {photos[i] ? (
+                        <img src={photos[i].dataUrl} alt={`Photo ${i + 1}`} className="strip-img" />
+                      ) : (
+                        <div className="strip-empty">{i + 1}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </section>
 
-          <section className="panel-section">
-            <h2 className="panel-title">Frame</h2>
-            <div className="frame-row">
-              {FRAMES.map((fr) => (
-                <button
-                  key={fr.id}
-                  className={`frame-btn ${activeFrame.id === fr.id ? "active" : ""}`}
-                  style={{ borderColor: fr.color, background: activeFrame.id === fr.id ? fr.color : "transparent" }}
-                  onClick={() => setActiveFrame(fr)}
-                >
-                  {fr.label}
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="panel-section">
+<section className="panel-section">
             <label className="toggle-row">
               <span className="toggle-label">Mirror Camera</span>
               <input type="checkbox" checked={mirrored} onChange={(e) => setMirrored(e.target.checked)} className="sr-only" />
@@ -442,17 +478,21 @@ export default function PhotoboothApp() {
         .camera-select { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: 'DM Mono', monospace; font-size: 0.75rem; padding: 0.4rem 0.6rem; cursor: pointer; width: 100%; max-width: 280px; outline: none; }
         .camera-select:focus { border-color: var(--accent); }
         .strip-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; }
+        .layout-row { display: flex; gap: 0.5rem; }
+        .layout-btn { flex: 1; padding: 0.5rem 0.75rem; border: 2px solid var(--border); border-radius: 8px; cursor: pointer; font-family: 'DM Mono', monospace; font-size: 0.8rem; color: var(--muted); background: transparent; transition: all 0.2s; letter-spacing: 0.05em; }
+        .layout-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(232,184,109,0.1); }
+        .layout-btn:hover { border-color: var(--accent); }
         .photo-strip { margin-top: 0.75rem; border-radius: 4px; overflow: hidden; background: #ffffff; padding: 12px; }
+        .photo-strip.polaroid-layout { padding: 16px 16px 8px; }
         .strip-header { text-align: center; font-size: 0.85rem; font-weight: 700; color: #222; padding: 6px 0 10px; letter-spacing: 0.08em; }
         .strip-photos { display: flex; flex-direction: column; gap: 8px; }
         .strip-slot { aspect-ratio: 4/3; background: #111; border-radius: 2px; overflow: hidden; }
         .strip-img { width: 100%; height: 100%; object-fit: cover; display: block; }
         .strip-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: #444; font-size: 1.2rem; background: #111; }
+        .polaroid-slot { aspect-ratio: 1/1; background: #111; border-radius: 2px; overflow: hidden; }
+        .polaroid-date { text-align: center; font-size: 0.85rem; font-weight: 700; color: #222; padding: 12px 0 6px; letter-spacing: 0.08em; }
         .panel-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; }
         .panel-title { font-size: 0.7rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.75rem; }
-        .frame-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-        .frame-btn { flex: 1; padding: 0.4rem 0.5rem; border: 2px solid; border-radius: 8px; cursor: pointer; font-family: 'DM Mono', monospace; font-size: 0.75rem; color: var(--text); transition: all 0.2s; letter-spacing: 0.05em; }
-        .frame-btn.active { color: #111; }
         .toggle-row { display: flex; align-items: center; justify-content: space-between; cursor: pointer; }
         .toggle-label { font-size: 0.75rem; color: var(--muted); }
         .toggle-track { width: 44px; height: 24px; border-radius: 12px; background: var(--border); position: relative; transition: background 0.3s; }
