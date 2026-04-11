@@ -139,65 +139,55 @@ export default function PhotoboothApp() {
     setPhase("done");
   }, [stream, phase, captureFrame]);
 
+  const formatStripDate = useCallback(() => {
+    const now = new Date();
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const dd = String(now.getDate()).padStart(2, "0");
+    const yy = String(now.getFullYear()).slice(-2);
+    return `${mm}.${dd}.${yy}`;
+  }, []);
+
   const buildStrip = useCallback(async (): Promise<string> => {
     const canvas = stripRef.current!;
-    const SPROCKET_W = 40;
+    const BORDER = 30;
     const PHOTO_W = 420;
     const PHOTO_H = 315;
-    const PADDING = 20;
-    const HEADER = 60;
-    const FOOTER = 80;
-    const INNER_W = PHOTO_W + PADDING * 2;
+    const GAP = 16;
+    const HEADER_H = 70;
+    const FOOTER_H = 40;
 
-    canvas.width = SPROCKET_W + INNER_W + SPROCKET_W;
-    canvas.height = HEADER + (PHOTO_H + PADDING) * 4 + FOOTER;
+    canvas.width = BORDER + PHOTO_W + BORDER;
+    canvas.height = BORDER + HEADER_H + (PHOTO_H + GAP) * 4 - GAP + FOOTER_H + BORDER;
     const ctx = canvas.getContext("2d")!;
 
-    // Fill entire strip black (film base)
-    ctx.fillStyle = "#111";
+    // White strip background
+    ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Sprocket hole dimensions
-    const holeW = 18;
-    const holeH = 26;
-    const holeGap = 40;
-    const holeR = 4;
-    ctx.fillStyle = "#f5f5f0";
-
-    // Left & right sprocket holes (vertical)
-    for (let y = 12; y < canvas.height - 12; y += holeH + holeGap) {
-      const lx = (SPROCKET_W - holeW) / 2;
-      ctx.beginPath();
-      ctx.roundRect(lx, y, holeW, holeH, holeR);
-      ctx.fill();
-      const rx = SPROCKET_W + INNER_W + (SPROCKET_W - holeW) / 2;
-      ctx.beginPath();
-      ctx.roundRect(rx, y, holeW, holeH, holeR);
-      ctx.fill();
-    }
-
-    // Draw photos in the center area
-    for (let i = 0; i < photos.length; i++) {
-      const y = HEADER + i * (PHOTO_H + PADDING);
-      const img = new Image();
-      img.src = photos[i].dataUrl;
-      await new Promise((r) => { img.onload = r; });
-      ctx.drawImage(img, SPROCKET_W + PADDING, y, PHOTO_W, PHOTO_H);
-    }
-
-    // Date text at bottom
-    const now = new Date();
-    ctx.fillStyle = activeFrame.color;
-    ctx.font = "14px monospace";
+    // Date header
+    ctx.fillStyle = "#222";
+    ctx.font = "bold 28px 'DM Mono', monospace";
     ctx.textAlign = "center";
-    ctx.fillText(
-      now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }),
-      canvas.width / 2,
-      canvas.height - FOOTER / 2 + 10
-    );
+    ctx.fillText(formatStripDate(), canvas.width / 2, BORDER + HEADER_H / 2 + 10);
+
+    // Draw photo slots
+    for (let i = 0; i < 4; i++) {
+      const x = BORDER;
+      const y = BORDER + HEADER_H + i * (PHOTO_H + GAP);
+
+      if (i < photos.length) {
+        const img = new Image();
+        img.src = photos[i].dataUrl;
+        await new Promise((r) => { img.onload = r; });
+        ctx.drawImage(img, x, y, PHOTO_W, PHOTO_H);
+      } else {
+        ctx.fillStyle = "#111";
+        ctx.fillRect(x, y, PHOTO_W, PHOTO_H);
+      }
+    }
 
     return canvas.toDataURL("image/png");
-  }, [photos, activeFrame]);
+  }, [photos, formatStripDate]);
 
   const downloadStrip = useCallback(async () => {
     const url = await buildStrip();
@@ -326,25 +316,19 @@ export default function PhotoboothApp() {
         <div className="panel-col">
           <section className="strip-section">
             <h2 className="panel-title">Your Strip</h2>
-            <div className="film-strip" style={{ boxShadow: `0 0 20px ${activeFrame.color}55` }}>
-              <div className="film-sprockets film-sprockets-left" />
-              <div className="film-center">
-                <div className="strip-photos">
-                  {[0, 1, 2, 3].map((i) => (
-                    <div key={i} className="strip-slot">
-                      {photos[i] ? (
-                        <img src={photos[i].dataUrl} alt={`Photo ${i + 1}`} className="strip-img" />
-                      ) : (
-                        <div className="strip-empty">{i + 1}</div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <div className="strip-footer" style={{ color: activeFrame.color }}>
-                  {new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
-                </div>
+            <div className="photo-strip" style={{ boxShadow: `0 0 20px ${activeFrame.color}55` }}>
+              <div className="strip-header">{formatStripDate()}</div>
+              <div className="strip-photos">
+                {[0, 1, 2, 3].map((i) => (
+                  <div key={i} className="strip-slot">
+                    {photos[i] ? (
+                      <img src={photos[i].dataUrl} alt={`Photo ${i + 1}`} className="strip-img" />
+                    ) : (
+                      <div className="strip-empty">{i + 1}</div>
+                    )}
+                  </div>
+                ))}
               </div>
-              <div className="film-sprockets film-sprockets-right" />
             </div>
           </section>
 
@@ -458,24 +442,12 @@ export default function PhotoboothApp() {
         .camera-select { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: 'DM Mono', monospace; font-size: 0.75rem; padding: 0.4rem 0.6rem; cursor: pointer; width: 100%; max-width: 280px; outline: none; }
         .camera-select:focus { border-color: var(--accent); }
         .strip-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; }
-        .film-strip { display: flex; margin-top: 0.75rem; border-radius: 4px; overflow: hidden; background: #111; }
-        .film-sprockets {
-          width: 24px; min-width: 24px; background: #1a1a1a; position: relative; flex-shrink: 0;
-          background-image: repeating-linear-gradient(
-            to bottom,
-            transparent 0px, transparent 8px,
-            #f5f5f0 8px, #f5f5f0 26px,
-            transparent 26px, transparent 46px
-          );
-          background-size: 100% 46px;
-          background-position: center 4px;
-        }
-        .film-center { flex: 1; min-width: 0; }
-        .strip-photos { padding: 8px; display: flex; flex-direction: column; gap: 4px; }
-        .strip-slot { aspect-ratio: 4/3; background: #1e1e1e; border-radius: 2px; overflow: hidden; }
+        .photo-strip { margin-top: 0.75rem; border-radius: 4px; overflow: hidden; background: #ffffff; padding: 12px; }
+        .strip-header { text-align: center; font-size: 0.85rem; font-weight: 700; color: #222; padding: 6px 0 10px; letter-spacing: 0.08em; }
+        .strip-photos { display: flex; flex-direction: column; gap: 8px; }
+        .strip-slot { aspect-ratio: 4/3; background: #111; border-radius: 2px; overflow: hidden; }
         .strip-img { width: 100%; height: 100%; object-fit: cover; display: block; }
-        .strip-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: #333; font-size: 1.2rem; }
-        .strip-footer { text-align: center; padding: 8px; font-size: 0.65rem; letter-spacing: 0.15em; }
+        .strip-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: #444; font-size: 1.2rem; background: #111; }
         .panel-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; }
         .panel-title { font-size: 0.7rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.75rem; }
         .frame-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
